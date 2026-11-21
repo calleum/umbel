@@ -14,7 +14,7 @@
 (local page (require :umbel.page))
 (local pack string.pack)
 (local unpack string.unpack)
-(local MAGIC "UMBL")
+(local MAGIC :UMBL)
 
 (local type-codes {:int32 1 :uint32 2 :int64 3 :uint64 4 :string 5})
 (local code-types {})
@@ -27,43 +27,47 @@
 (fn record-size [schema]
   "Packed byte size of one record."
   (var n 0)
-  (each [_ f (ipairs schema)] (set n (+ n (field-size f))))
+  (each [_ f (ipairs schema)]
+    (set n (+ n (field-size f))))
   n)
 
 (fn check-value [f v]
   (if (= f.type :string)
-      (do (when (> (length v) f.size)
-            (error (.. "schema: string value too long for field " f.name)))
-          v)
-      (do (when (not= (type v) "number")
-            (error (.. "schema: field " f.name " expects a number")))
-          v)))
+      (do
+        (when (> (length v) f.size)
+          (error (.. "schema: string value too long for field " f.name)))
+        v)
+      (do
+        (when (not= (type v) :number)
+          (error (.. "schema: field " f.name " expects a number")))
+        v)))
 
 (fn encode-field [f v]
   (case f.type
-    :int32 (pack "<i4" v)
-    :uint32 (pack "<I4" v)
-    :int64 (pack "<i8" v)
-    :uint64 (pack "<I8" v)
-    :string (pack (.. "c" f.size) v)))
+    :int32 (pack :<i4 v)
+    :uint32 (pack :<I4 v)
+    :int64 (pack :<i8 v)
+    :uint64 (pack :<I8 v)
+    :string (pack (.. :c f.size) v)))
 
 (fn encode [schema rec]
   "Pack a table of {name = value} into record bytes."
   (var buf "")
   (each [_ f (ipairs schema)]
-    (local v (or (. rec f.name)
-                 (error (.. "schema: missing value for field " f.name))))
+    (local v
+           (or (. rec f.name) (error (.. "schema: missing value for field "
+                                         f.name))))
     (set buf (.. buf (encode-field f (check-value f v)))))
   buf)
 
 (fn decode-field [f buf pos]
   (case f.type
-    :int32 (values (unpack "<i4" buf pos))
-    :uint32 (values (unpack "<I4" buf pos))
-    :int64 (values (unpack "<i8" buf pos))
-    :uint64 (values (unpack "<I8" buf pos))
-    :string (let [(raw next) (unpack (.. "c" f.size) buf pos)
-                  trimmed (raw:gsub "\0+$" "")]
+    :int32 (values (unpack :<i4 buf pos))
+    :uint32 (values (unpack :<I4 buf pos))
+    :int64 (values (unpack :<i8 buf pos))
+    :uint64 (values (unpack :<I8 buf pos))
+    :string (let [(raw next) (unpack (.. :c f.size) buf pos)
+                  trimmed (raw:gsub "\000+$" "")]
               (values trimmed next))))
 
 (fn decode [schema buf]
@@ -78,36 +82,41 @@
 
 (fn catalog-to-page [schema]
   "Encode a schema into its catalog page."
-  (var buf (.. MAGIC (pack "<I2I2" 1 (length schema))))
+  (var buf (.. MAGIC (pack :<I2I2 1 (length schema))))
   (each [_ f (ipairs schema)]
-    (set buf (.. buf
-                 (pack "<BI2B" (or (. type-codes f.type)
-                                      (error (.. "schema: bad type " (tostring f.type))))
-                        (field-size f)
-                        (length f.name))
+    (set buf (.. buf (pack :<BI2B
+                           (or (. type-codes f.type)
+                               (error (.. "schema: bad type " (tostring f.type))))
+                           (field-size f) (length f.name))
                  f.name)))
-  (.. buf (string.rep "\0" (- page.BLKSZ (length buf)))))
+  (.. buf (string.rep "\000" (- page.BLKSZ (length buf)))))
 
 (fn catalog-from-page [data]
   "Decode a catalog page back into a schema vector."
   (when (not= (data:sub 1 4) MAGIC)
     (error "schema: not an umbel catalog page"))
-  (let [(version cnt) (unpack "<I2I2" data 5)]
-    (when (not= version 1) (error (.. "schema: unknown catalog version " version)))
+  (let [(version cnt) (unpack :<I2I2 data 5)]
+    (when (not= version 1)
+      (error (.. "schema: unknown catalog version " version)))
     (local schema [])
     (var pos 9)
     (for [i 1 cnt]
-      (let [(code size name-len next) (unpack "<BI2B" data pos)
+      (let [(code size name-len next) (unpack :<BI2B data pos)
             name (data:sub next (- (+ next name-len) 1))
             f (case code
-                5 {:name name :type :string :size size}
+                5 {: name :type :string : size}
                 _ (let [ty (or (. code-types code)
                                (error (.. "schema: bad field code " code)))]
-                    {:name name :type ty}))]
+                    {: name :type ty}))]
         (table.insert schema f)
         (set pos (+ next name-len))))
     schema))
 
-{:type-codes type-codes :fixed-sizes fixed-sizes :field-size field-size
- :record-size record-size :encode encode :decode decode
- :catalog-to-page catalog-to-page :catalog-from-page catalog-from-page}
+{: type-codes
+ : fixed-sizes
+ : field-size
+ : record-size
+ : encode
+ : decode
+ : catalog-to-page
+ : catalog-from-page}

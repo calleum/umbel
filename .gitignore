@@ -2,4 +2,5 @@
 *.idx
 *.wal
 *.lua
+*.so
 /data/

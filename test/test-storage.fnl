@@ -6,9 +6,9 @@
 (local pagedir (require :umbel.pagedir))
 (local bufmgr (require :umbel.bufmgr))
 
-(local tmpdir (os.getenv "TMPDIR"))
-(local dir (if (and tmpdir (not= tmpdir "")) tmpdir "/tmp"))
-(local dbfile (.. dir "/umbel-test-heap.db"))
+(local tmpdir (os.getenv :TMPDIR))
+(local dir (if (and tmpdir (not= tmpdir "")) tmpdir :/tmp))
+(local dbfile (.. dir :/umbel-test-heap.db))
 
 (os.remove dbfile)
 
@@ -91,13 +91,13 @@
     (os.remove dbfile)
     (local hf (heapfile.open dbfile))
     (var seed (page.page-init))
-    (local (seed _) (page.add-item seed "seeded"))
+    (local (seed _) (page.add-item seed :seeded))
     (heapfile.extend hf seed)
     (heapfile.extend hf (page.page-init))
     (local buf (bufmgr.new 2))
     (local s0 (bufmgr.get-page buf hf 0))
     (t.assert= 1 (bufmgr.pinned-count buf) "get-page pins")
-    (t.assert= "seeded" (page.get-item s0.data 1) "slot loaded page 0")
+    (t.assert= :seeded (page.get-item s0.data 1) "slot loaded page 0")
     (bufmgr.release buf s0 true)
     (t.assert= 1 (bufmgr.dirty-count buf) "released dirty")
     (local s1 (bufmgr.get-page buf hf 1))
@@ -114,13 +114,13 @@
     ;; six pages, each tagged with its page id
     (for [i 0 5]
       (var p (page.page-init))
-      (local (p2 _) (page.add-item p (string.pack "<I4" i)))
+      (local (p2 _) (page.add-item p (string.pack :<I4 i)))
       (heapfile.extend hf p2))
     ;; cycle through all six with a 2-slot pool
     (for [round 1 3]
       (for [i 0 5]
         (local s (bufmgr.get-page buf hf i))
-        (t.assert= i (string.unpack "<I4" (page.get-item s.data 1))
+        (t.assert= i (string.unpack :<I4 (page.get-item s.data 1))
                    (.. "round " round " page " i " holds its tag"))
         (bufmgr.release buf s false)))
     (heapfile.close hf)))
@@ -133,7 +133,7 @@
     (for [i 0 4] (heapfile.extend hf (page.page-init)))
     ;; dirty page 0 with marker, then force eviction by touching 1,2,3
     (local s0 (bufmgr.get-page buf hf 0))
-    (local (p _) (page.add-item s0.data "evicted-dirty"))
+    (local (p _) (page.add-item s0.data :evicted-dirty))
     (set s0.data p)
     (bufmgr.release buf s0 true)
     (each [_ i (ipairs [1 2 3])]
@@ -141,7 +141,7 @@
         (bufmgr.release buf s false)))
     ;; fresh read straight from disk bypassing the pool
     (local from-disk (page.get-item (heapfile.read-page hf 0) 1))
-    (t.assert= "evicted-dirty" from-disk "dirty page reached the disk")
+    (t.assert= :evicted-dirty from-disk "dirty page reached the disk")
     (heapfile.close hf)
     (os.remove dbfile)))
 

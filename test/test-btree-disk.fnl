@@ -1,17 +1,17 @@
-;;; Disk-resident B+ tree tests — roadmap task 3.4.
+;;; Disk-resident B+ tree tests 
 
 (local t (require :harness))
 (local btd (require :umbel.btree-disk))
 
-(local tmpdir (os.getenv "TMPDIR"))
-(local dir (if (and tmpdir (not= tmpdir "")) tmpdir "/tmp"))
-(local idxfile (.. dir "/umbel-test.idx"))
+(local tmpdir (os.getenv :TMPDIR))
+(local dir (if (and tmpdir (not= tmpdir "")) tmpdir :/tmp))
+(local idxfile (.. dir :/umbel-test.idx))
 (os.remove idxfile)
 
 (t.deftest "btree-disk: node page round trip"
   (fn []
-    ;; Task 3.3: explicit leaf and internal node binary round trips
-    (local leaf {:leaf true :keys [10 20 30]
+    (local leaf {:leaf true
+                 :keys [10 20 30]
                  :vals [{:page 2 :slot 1} {:page 2 :slot 4} {:page 3 :slot 2}]
                  :next 9})
     (local leaf-bytes (btd.encode-node-for-test leaf))
@@ -23,7 +23,6 @@
     (t.assert= 20 (. leaf2.keys 2) "leaf key round trips")
     (t.assert= 3 (. (. leaf2.vals 3) :page) "leaf val page round trips")
     (t.assert= 2 (. (. leaf2.vals 3) :slot) "leaf val slot round trips")
-
     (local internal {:leaf false :keys [50 100] :children [2 3 4]})
     (local int-bytes (btd.encode-node-for-test internal))
     (t.assert= 4096 (length int-bytes) "encoded internal node is one page")
@@ -33,7 +32,6 @@
     (t.assert= 100 (. int2.keys 2) "internal key round trips")
     (t.assert= 3 (length int2.children) "internal children count round trips")
     (t.assert= 4 (. int2.children 3) "internal child id round trips")
-
     ;; sanity-check a fresh index file
     (local idx (btd.open idxfile))
     (t.assert= 0 (btd.count idx) "fresh index is empty")
@@ -50,8 +48,7 @@
     (var bad 0)
     (for [i 1 200]
       (local tid (btd.search idx (* i 3)))
-      (when (or (= tid nil)
-                (not= tid.page (+ 2 (// i 40)))
+      (when (or (= tid nil) (not= tid.page (+ 2 (// i 40)))
                 (not= tid.slot (% i 17)))
         (set bad (+ bad 1))))
     (t.assert= 0 bad "all keys found with their tids")
@@ -62,7 +59,8 @@
     (t.assert= 200 (btd.count idx2) "count survives reopen")
     (var bad2 0)
     (for [i 1 200]
-      (when (= (btd.search idx2 (* i 3)) nil) (set bad2 (+ bad2 1))))
+      (when (= (btd.search idx2 (* i 3)) nil)
+        (set bad2 (+ bad2 1))))
     (t.assert= 0 bad2 "all keys found after reopen")
     (btd.close idx2)))
 
@@ -70,13 +68,15 @@
   (fn []
     (os.remove idxfile)
     (local idx (btd.open idxfile))
-    (for [i 1 600] (btd.insert idx i {:page 2 :slot (% i 13)}))
+    (for [i 1 600]
+      (btd.insert idx i {:page 2 :slot (% i 13)}))
     (t.assert= 600 (btd.count idx) "600 entries")
     (t.assert= 600 (length (btd.pairs-all idx)) "pairs-all walks every leaf")
     (var ordered true)
     (let [all (btd.pairs-all idx)]
       (for [i 2 (length all)]
-        (when (< (. (. all i) 1) (. (. all (- i 1)) 1)) (set ordered false))))
+        (when (< (. (. all i) 1) (. (. all (- i 1)) 1))
+          (set ordered false))))
     (t.assert= true ordered "full scan is sorted")
     (btd.close idx)))
 

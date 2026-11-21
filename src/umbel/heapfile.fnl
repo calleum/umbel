@@ -6,15 +6,30 @@
 ;; appends at the end and returns the new page id.
 
 (local page (require :umbel.page))
+(local sys (require :umbel.sys))
 
 (fn open [path]
-  "Open (or create) a heap file at path; return the handle."
-  (let [f (or (io.open path "r+b") (io.open path "w+b"))]
-    (when (= f nil) (error (.. "heapfile: cannot open " path)))
-    {:file f : path :blksz page.BLKSZ}))
+  "Open (or create) a heap file at path; return the handle.
+On creation, fsyncs the parent directory so the directory entry survives power loss."
+  (local existing (io.open path "r+b"))
+  (if existing
+      {:file existing : path :blksz page.BLKSZ}
+      (let [f (io.open path "w+b")]
+        (when (= f nil) (error (.. "heapfile: cannot open " path)))
+        (sys.fsync f)
+        (sys.sync-dir path)
+        {:file f : path :blksz page.BLKSZ})))
 
 (fn num-pages [hf]
   (math.floor (/ (hf.file:seek "end") hf.blksz)))
+
+(fn sync [hf]
+  "Flush stdio buffers and fsync the heap file to durable storage."
+  (sys.fsync hf.file))
+
+(fn lock [hf mode]
+  "Acquire/release a POSIX flock on the heap file: \"sh\"|\"ex\"|\"un\"|\"sh_nb\"|\"ex_nb\"."
+  (sys.flock hf.file mode))
 
 (fn close [hf]
   (hf.file:close))
@@ -54,5 +69,6 @@
   (hf.file:flush)
   page-id)
 
-{:open open :close close :num-pages num-pages :page-aligned? page-aligned?
- :read-page read-page :write-page write-page :extend extend}
+{:open open :close close :sync sync :lock lock :num-pages num-pages
+ :page-aligned? page-aligned? :read-page read-page :write-page write-page
+ :extend extend}

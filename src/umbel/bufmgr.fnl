@@ -11,13 +11,16 @@
 (local hf-read heapfile.read-page)
 (local hf-write heapfile.write-page)
 
-(fn new [pool-size]
-  "Create a buffer pool with pool-size slots."
+(fn new [pool-size opts]
+  "Create a buffer pool with pool-size slots.
+Optional opts.before-write(page-id, data) runs before any dirty write/eviction
+so the WAL rule (flushed_lsn >= page_lsn) is enforced."
   (local slots [])
   (for [i 1 pool-size]
     (table.insert slots {:valid false :page-id -1 :data "" :dirty false
                          :pin 0 :usage 0}))
-  {: pool-size :hand 0 :slots slots})
+  {: pool-size :hand 0 :slots slots
+   :before-write (when opts opts.before-write)})
 
 (fn find-slot [buf page-id]
   (var found nil)
@@ -52,6 +55,7 @@
             s)
         (let [v (victim buf)]
           (when (and v.valid v.dirty)
+            (when buf.before-write (buf.before-write v.page-id v.data))
             (hf-write hf v.page-id v.data))
           (set v.valid true)
           (set v.page-id page-id)
@@ -69,12 +73,14 @@
 
 (fn flush-slot [buf hf slot]
   (when (and slot.valid slot.dirty)
+    (when buf.before-write (buf.before-write slot.page-id slot.data))
     (hf-write hf slot.page-id slot.data)
     (set slot.dirty false)))
 
-(fn flush-all [buf hf]
-  "Write every dirty slot back to the heap file."
-  (each [_ s (ipairs buf.slots)] (flush-slot buf hf s)))
+(fn flush-all [buf hf durable?]
+  "Write every dirty slot back to the heap file; fsync when durable? is true."
+  (each [_ s (ipairs buf.slots)] (flush-slot buf hf s))
+  (when durable? (heapfile.sync hf)))
 
 (fn pinned-count [buf]
   (var n 0)

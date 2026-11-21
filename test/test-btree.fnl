@@ -1,4 +1,4 @@
-;;; In-memory B+ tree tests — mirrors roadmap tasks 3.1 and 3.2.
+;;; In-memory B+ tree tests
 
 (local t (require :harness))
 (local btree (require :umbel.btree))
@@ -6,11 +6,10 @@
 (t.deftest "btree: insert and search small set"
   (fn []
     (local tr (btree.new))
-    ;; roadmap order: 10 20 5 6 12 30 7 17
     (each [_ k (ipairs [10 20 5 6 12 30 7 17])]
-      (btree.insert tr k (.. "v" k)))
+      (btree.insert tr k (.. :v k)))
     (each [_ k (ipairs [10 20 5 6 12 30 7 17])]
-      (t.assert= (.. "v" k) (btree.search tr k) (.. "key " k " found")))
+      (t.assert= (.. :v k) (btree.search tr k) (.. "key " k " found")))
     (t.assert-nil (btree.search tr 99) "absent key is nil")
     (t.assert= 8 tr.count "count tracks inserts")))
 
@@ -27,7 +26,8 @@
     (t.assert= 100 tr.count)
     (var bad 0)
     (for [i 1 100]
-      (when (not= i (btree.search tr (* i 7))) (set bad (+ bad 1))))
+      (when (not= i (btree.search tr (* i 7)))
+        (set bad (+ bad 1))))
     (t.assert= 0 bad "all 100 sequential keys found")))
 
 (t.deftest "btree: splits exercised by reverse insertion"
@@ -50,7 +50,8 @@
     (t.assert= 40 (. (. out 21) 1) "ends at hi")
     (var ordered true)
     (for [i 2 (length out)]
-      (when (< (. (. out i) 1) (. (. out (- i 1)) 1)) (set ordered false)))
+      (when (< (. (. out i) 1) (. (. out (- i 1)) 1))
+        (set ordered false)))
     (t.assert= true ordered "range comes out sorted")))
 
 (t.deftest "btree: delete single key, then all keys"
