@@ -35,11 +35,11 @@
 
 (fn make-bufmgr [pool-size wal-handle]
   (bufmgr.new (or pool-size 16)
-              {:before-write
-               (when wal-handle
-                 (fn [page-id data]
-                   (when (>= page-id FIRST-DATA-PAGE)
-                     (wal.ensure-flushed wal-handle (page.get-lsn data)))))}))
+              {:before-write (when wal-handle
+                               (fn [page-id data]
+                                 (when (>= page-id FIRST-DATA-PAGE)
+                                   (wal.ensure-flushed wal-handle
+                                                       (page.get-lsn data)))))}))
 
 (fn rebuild-dir [hf]
   "Rebuild page directory accurately from all live data pages on disk."
@@ -58,8 +58,14 @@
   (local dir-slot (bufmgr.get-page buf hf DIR-PAGE))
   (local dir (pagedir.from-page dir-slot.data))
   (bufmgr.release buf dir-slot false)
-  {:hf hf :buf buf :schema schema :dir dir :wal wal-handle
-   :lm (lockmgr.new) :active-txn nil :active-txns {}})
+  {: hf
+   : buf
+   : schema
+   : dir
+   :wal wal-handle
+   :lm (lockmgr.new)
+   :active-txn nil
+   :active-txns {}})
 
 (fn create [path schema opts]
   "Create a new table file at path with the given schema."
@@ -75,8 +81,9 @@
   (load hf (make-bufmgr (when opts opts.pool-size) w) w))
 
 (fn file-exists? [path]
-  (let [f (io.open path "r")]
-    (if f (do (f:close) true) false)))
+  (let [f (io.open path :r)]
+    (if f (do
+            (f:close) true) false)))
 
 (fn open* [path schema opts]
   "Open a table, creating it from schema when the file is absent.
@@ -124,14 +131,15 @@ insert/read/delete/commit-txn/abort-txn."
   (when (or (= id nil) (not (. tbl.active-txns id)))
     (error "table: no active transaction"))
   (wal.undo-txn-online tbl.wal id
-    (fn [page-id mutate-fn]
-      (local slot (bufmgr.get-page tbl.buf tbl.hf page-id))
-      (local next-data (mutate-fn slot.data))
-      (set slot.data next-data)
-      (bufmgr.release tbl.buf slot true)
-      (when (>= page-id FIRST-DATA-PAGE)
-        (when (pagedir.find-by-page tbl.dir page-id)
-          (pagedir.update-free tbl.dir page-id (page.free-space next-data))))))
+                       (fn [page-id mutate-fn]
+                         (local slot (bufmgr.get-page tbl.buf tbl.hf page-id))
+                         (local next-data (mutate-fn slot.data))
+                         (set slot.data next-data)
+                         (bufmgr.release tbl.buf slot true)
+                         (when (>= page-id FIRST-DATA-PAGE)
+                           (when (pagedir.find-by-page tbl.dir page-id)
+                             (pagedir.update-free tbl.dir page-id
+                                                  (page.free-space next-data))))))
   (tset tbl.active-txns id nil)
   (when (= tbl.active-txn id) (set tbl.active-txn nil))
   (lockmgr.release-all tbl.lm id))
@@ -147,16 +155,20 @@ auto-committed single-statement WAL transaction when WAL is enabled."
           (let [(txn) (wal.begin tbl.wal)
                 (ok res) (pcall f txn true)]
             (if ok
-                (do (wal.commit tbl.wal txn)
-                    (lockmgr.release-all tbl.lm txn)
-                    res)
-                (do (wal.undo-txn-online tbl.wal txn
-                      (fn [page-id mutate-fn]
-                        (local slot (bufmgr.get-page tbl.buf tbl.hf page-id))
-                        (set slot.data (mutate-fn slot.data))
-                        (bufmgr.release tbl.buf slot true)))
-                    (lockmgr.release-all tbl.lm txn)
-                    (error res)))))))
+                (do
+                  (wal.commit tbl.wal txn)
+                  (lockmgr.release-all tbl.lm txn)
+                  res)
+                (do
+                  (wal.undo-txn-online tbl.wal txn
+                                       (fn [page-id mutate-fn]
+                                         (local slot
+                                                (bufmgr.get-page tbl.buf tbl.hf
+                                                                 page-id))
+                                         (set slot.data (mutate-fn slot.data))
+                                         (bufmgr.release tbl.buf slot true)))
+                  (lockmgr.release-all tbl.lm txn)
+                  (error res)))))))
 
 ;; -- directory persistence ------------------------------------------------
 
@@ -174,26 +186,30 @@ auto-committed single-statement WAL transaction when WAL is enabled."
 
 (fn insert [tbl record txn]
   "Insert packed record bytes; return the TupleId {page slot}."
-  (with-txn tbl txn
+  (with-txn tbl
+    txn
     (fn [tx]
       (local page-id (or (pagedir.find-free tbl.dir (required-space record))
                          (let [id (heapfile.extend tbl.hf (page.page-init))]
-                           (pagedir.add-entry tbl.dir id (page.free-space (page.page-init)))
+                           (pagedir.add-entry tbl.dir id
+                                              (page.free-space (page.page-init)))
                            id)))
       ;; Respect any active page-level lock (e.g., compaction on this page).
       (when tx (lockmgr.acquire tbl.lm tx (page-key page-id) :shared))
       (local slot (bufmgr.get-page tbl.buf tbl.hf page-id))
-      (local skip? (when tx
-                     (fn [n]
-                       (lockmgr.locked-by-other? tbl.lm tx
-                                                 (tid-key {:page page-id :slot n})))))
+      (local skip?
+             (when tx
+               (fn [n]
+                 (lockmgr.locked-by-other? tbl.lm tx
+                                           (tid-key {:page page-id :slot n})))))
       (local (data n) (page.add-item slot.data record skip?))
       (local tid {:page page-id :slot n})
       (when tx (lockmgr.acquire tbl.lm tx (tid-key tid) :exclusive))
-      (local stamped
-        (if tx
-            (page.set-lsn data (wal.log-page-add tbl.wal tx page-id n record))
-            data))
+      (local stamped (if tx
+                         (page.set-lsn data
+                                       (wal.log-page-add tbl.wal tx page-id n
+                                                         record))
+                         data))
       (set slot.data stamped)
       (bufmgr.release tbl.buf slot true)
       (pagedir.update-free tbl.dir page-id (page.free-space stamped))
@@ -210,7 +226,8 @@ auto-committed single-statement WAL transaction when WAL is enabled."
 
 (fn delete [tbl tid txn]
   "Tombstone the record at TupleId."
-  (with-txn tbl txn
+  (with-txn tbl
+    txn
     (fn [tx]
       (when tx
         (lockmgr.acquire tbl.lm tx (page-key tid.page) :shared)
@@ -218,41 +235,45 @@ auto-committed single-statement WAL transaction when WAL is enabled."
       (local slot (bufmgr.get-page tbl.buf tbl.hf tid.page))
       (local old-bytes (page.get-item slot.data tid.slot))
       (local new-page (page.delete-item slot.data tid.slot))
-      (local stamped
-        (if (and tx old-bytes)
-            (page.set-lsn new-page
-                          (wal.log-page-del tbl.wal tx tid.page tid.slot old-bytes))
-            new-page))
+      (local stamped (if (and tx old-bytes)
+                         (page.set-lsn new-page
+                                       (wal.log-page-del tbl.wal tx tid.page
+                                                         tid.slot old-bytes))
+                         new-page))
       (set slot.data stamped)
       (bufmgr.release tbl.buf slot true))))
 
 (fn compact-page [tbl page-id txn]
   "Defragment one page; reclaims tombstoned record bytes."
-  (with-txn tbl txn
+  (with-txn tbl
+    txn
     (fn [tx]
       (when tx (lockmgr.acquire tbl.lm tx (page-key page-id) :exclusive))
       (local slot (bufmgr.get-page tbl.buf tbl.hf page-id))
       (local old-page slot.data)
       (local new-page (page.compact old-page))
-      (local stamped
-        (if tx
-            (page.set-lsn new-page (wal.append tbl.wal tx page-id 0 old-page new-page))
-            new-page))
+      (local stamped (if tx
+                         (page.set-lsn new-page
+                                       (wal.append tbl.wal tx page-id 0
+                                                   old-page new-page))
+                         new-page))
       (set slot.data stamped)
       (bufmgr.release tbl.buf slot true)
       (pagedir.update-free tbl.dir page-id (page.free-space stamped)))))
 
 (fn scan [tbl]
   "Iterate every live record as tid, bytes across all data pages."
-  (coroutine.wrap
-   (fn []
-     (for [page-id FIRST-DATA-PAGE (- (heapfile.num-pages tbl.hf) 1)]
-       (local slot (bufmgr.get-page tbl.buf tbl.hf page-id))
-       (local data slot.data)
-       (bufmgr.release tbl.buf slot false)
-       (page.each-item data
-                       (fn [n bytes]
-                         (coroutine.yield {:page page-id :slot n} bytes)))))))
+  (coroutine.wrap (fn []
+                    (for [page-id FIRST-DATA-PAGE (- (heapfile.num-pages tbl.hf)
+                                                     1)]
+                      (local slot (bufmgr.get-page tbl.buf tbl.hf page-id))
+                      (local data slot.data)
+                      (bufmgr.release tbl.buf slot false)
+                      (page.each-item data
+                                      (fn [n bytes]
+                                        (coroutine.yield {:page page-id
+                                                          :slot n}
+                                                         bytes)))))))
 
 (fn count [tbl]
   "Number of live records."
@@ -289,9 +310,24 @@ auto-committed single-statement WAL transaction when WAL is enabled."
     (when (and (= found nil) (= f.name name)) (set found f)))
   found)
 
-{:CATALOG-PAGE CATALOG-PAGE :DIR-PAGE DIR-PAGE :FIRST-DATA-PAGE FIRST-DATA-PAGE
- :create create :open open* :load load :insert insert :read read :delete delete
- :compact-page compact-page :scan scan :count count :flush flush
- :checkpoint checkpoint :lock lock :close close* :field field
- :write-dir write-dir :begin-txn begin-txn :commit-txn commit-txn
- :abort-txn abort-txn}
+{: CATALOG-PAGE
+ : DIR-PAGE
+ : FIRST-DATA-PAGE
+ : create
+ :open open*
+ : load
+ : insert
+ : read
+ : delete
+ : compact-page
+ : scan
+ : count
+ : flush
+ : checkpoint
+ : lock
+ :close close*
+ : field
+ : write-dir
+ : begin-txn
+ : commit-txn
+ : abort-txn}

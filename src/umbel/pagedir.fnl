@@ -20,20 +20,19 @@
 
 (fn to-page [dir]
   "Encode directory state into its on-disk page."
-  (.. (pack "<I4" (length dir.entries))
-      (table.concat
-       (icollect [_ e (ipairs dir.entries)]
-         (pack "<I4I4" e.page e.free)))
-      (string.rep "\0" (- page.BLKSZ 4 (* 8 (length dir.entries))))))
+  (.. (pack :<I4 (length dir.entries))
+      (table.concat (icollect [_ e (ipairs dir.entries)]
+                      (pack :<I4I4 e.page e.free)))
+      (string.rep "\000" (- page.BLKSZ 4 (* 8 (length dir.entries))))))
 
 (fn from-page [data]
   "Decode a directory page into directory state."
-  (let [cnt (unpack "<I4" data 1)
+  (let [cnt (unpack :<I4 data 1)
         entries []]
     (for [i 1 cnt]
       (let [pos (+ 5 (* (- i 1) 8))
-            (pg free) (unpack "<I4I4" data pos)]
-        (table.insert entries {:page pg :free free})))
+            (pg free) (unpack :<I4I4 data pos)]
+        (table.insert entries {:page pg : free})))
     {: entries :capacity CAPACITY}))
 
 (fn find-by-page [dir page-id]
@@ -49,7 +48,7 @@
     (error (.. "pagedir: page " page-id " already registered")))
   (when (>= (length dir.entries) dir.capacity)
     (error "pagedir: directory page full"))
-  (table.insert dir.entries {:page page-id :free free}))
+  (table.insert dir.entries {:page page-id : free}))
 
 (fn find-free [dir required]
   "Return the first page id with at least `required` free bytes, or nil."
@@ -70,6 +69,12 @@
   (each [_ e (ipairs dir.entries)] (set sum (+ sum e.free)))
   sum)
 
-{:CAPACITY CAPACITY :init init :to-page to-page :from-page from-page
- :add-entry add-entry :find-by-page find-by-page :find-free find-free
- :update-free update-free :total-free total-free}
+{: CAPACITY
+ : init
+ : to-page
+ : from-page
+ : add-entry
+ : find-by-page
+ : find-free
+ : update-free
+ : total-free}

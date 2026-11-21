@@ -6,28 +6,30 @@
 (fn assert= [expected actual label]
   (let [ok (= expected actual)]
     (if ok
-      (set stats.passed (+ stats.passed 1))
-      (do
-        (set stats.failed (+ stats.failed 1))
-        (table.insert stats.failures
-                      (.. label ": expected " (fennel.view expected)
-                           ", got " (fennel.view actual)))))
+        (set stats.passed (+ stats.passed 1))
+        (do
+          (set stats.failed (+ stats.failed 1))
+          (table.insert stats.failures
+                        (.. label ": expected " (fennel.view expected) ", got "
+                            (fennel.view actual)))))
     ok))
 
 (fn assert-nil [actual label]
   (if (= nil actual)
-    (set stats.passed (+ stats.passed 1))
-    (do
-      (set stats.failed (+ stats.failed 1))
-      (table.insert stats.failures (.. label ": expected nil, got " (fennel.view actual))))))
+      (set stats.passed (+ stats.passed 1))
+      (do
+        (set stats.failed (+ stats.failed 1))
+        (table.insert stats.failures
+                      (.. label ": expected nil, got " (fennel.view actual))))))
 
 (fn assert-error [f label]
   (let [(ok err) (pcall f)]
     (if ok
-      (do
-        (set stats.failed (+ stats.failed 1))
-        (table.insert stats.failures (.. label ": expected an error, call succeeded")))
-      (set stats.passed (+ stats.passed 1)))))
+        (do
+          (set stats.failed (+ stats.failed 1))
+          (table.insert stats.failures
+                        (.. label ": expected an error, call succeeded")))
+        (set stats.passed (+ stats.passed 1)))))
 
 (fn deftest [name f]
   (let [before-failed stats.failed]

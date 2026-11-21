@@ -21,24 +21,24 @@
 
 (fn page-init []
   "Return a fresh empty page with pageLSN 0."
-  (.. (pack "<I4I4I8" HEADER-SIZE BLKSZ 0)
-      (string.rep "\0" (- BLKSZ HEADER-SIZE))))
+  (.. (pack :<I4I4I8 HEADER-SIZE BLKSZ 0)
+      (string.rep "\000" (- BLKSZ HEADER-SIZE))))
 
 (fn header [page]
   "Return lower and upper offsets of a page."
-  (unpack "<I4I4" page 1))
+  (unpack :<I4I4 page 1))
 
 (fn get-lsn [page]
   "Return the u64 pageLSN stored in the page header."
-  (let [(lsn) (unpack "<I8" page 9)] lsn))
+  (let [(lsn) (unpack :<I8 page 9)] lsn))
 
 (fn set-lsn [page lsn]
   "Return page with its pageLSN updated."
-  (.. (page:sub 1 8) (pack "<I8" lsn) (page:sub 17)))
+  (.. (page:sub 1 8) (pack :<I8 lsn) (page:sub 17)))
 
 (fn set-header [page lower upper]
   "Return page with lower and upper rewritten (preserving pageLSN)."
-  (.. (pack "<I4I4" lower upper) (page:sub 9)))
+  (.. (pack :<I4I4 lower upper) (page:sub 9)))
 
 (fn slot-count [page]
   "Number of slots currently allocated in the slot array."
@@ -47,13 +47,12 @@
 
 (fn slot-at [page i]
   "Read slot i (0-based) as offset, length."
-  (unpack "<I4I4" page (+ HEADER-SIZE (* i SLOT-SIZE) 1)))
+  (unpack :<I4I4 page (+ HEADER-SIZE (* i SLOT-SIZE) 1)))
 
 (fn set-slot-at [page i offset item-len]
   "Return page with slot i (0-based) rewritten."
   (let [pos (+ HEADER-SIZE (* i SLOT-SIZE) 1)]
-    (.. (page:sub 1 (- pos 1))
-        (pack "<I4I4" offset item-len)
+    (.. (page:sub 1 (- pos 1)) (pack :<I4I4 offset item-len)
         (page:sub (+ pos SLOT-SIZE)))))
 
 (fn free-space [page]
@@ -73,8 +72,7 @@
   "Return the 0-based index of the first reusable tombstone slot, or nil."
   (var found nil)
   (for [i 0 (- (slot-count page) 1)]
-    (when (and (= found nil)
-               (= (select 2 (slot-at page i)) 0)
+    (when (and (= found nil) (= (select 2 (slot-at page i)) 0)
                (not (and skip-slot? (skip-slot? (+ i 1)))))
       (set found i)))
   found)
@@ -95,13 +93,11 @@ Reuses an unlocked tombstone slot when one exists, otherwise appends a fresh slo
             slot-idx (or tomb (slot-count page))
             new-lower (if tomb lower (+ lower SLOT-SIZE))
             slot-pos (+ HEADER-SIZE (* slot-idx SLOT-SIZE) 1)]
-        (values (.. (pack "<I4I4I8" new-lower new-upper lsn)
+        (values (.. (pack :<I4I4I8 new-lower new-upper lsn)
                     (page:sub (+ HEADER-SIZE 1) (- slot-pos 1))
-                    (pack "<I4I4" new-upper len)
-                    (page:sub (+ slot-pos SLOT-SIZE) new-upper)
-                    bytes
-                    (page:sub (+ upper 1)))
-                (+ slot-idx 1))))))
+                    (pack :<I4I4 new-upper len)
+                    (page:sub (+ slot-pos SLOT-SIZE) new-upper) bytes
+                    (page:sub (+ upper 1))) (+ slot-idx 1))))))
 
 (fn get-item [page n]
   "Return the bytes of item n (1-based), or nil when absent or deleted."
@@ -130,7 +126,8 @@ and pageLSN are preserved, and dead bytes become reusable free space."
     (for [i 0 (- cnt 1)]
       (let [(off len) (slot-at page i)]
         (when (> len 0)
-          (table.insert live {:i i :len len :bytes (page:sub (+ off 1) (+ off len))}))))
+          (table.insert live
+                        {: i : len :bytes (page:sub (+ off 1) (+ off len))}))))
     (var total 0)
     (each [_ it (ipairs live)] (set total (+ total it.len)))
     (let [new-upper (- BLKSZ total)
@@ -142,10 +139,9 @@ and pageLSN are preserved, and dead bytes become reusable free space."
       (var slots "")
       (for [i 0 (- cnt 1)]
         (let [pair (or (. offsets i) [0 0])]
-          (set slots (.. slots (pack "<I4I4" (. pair 1) (. pair 2))))))
-      (.. (pack "<I4I4I8" lower new-upper lsn)
-          slots
-          (string.rep "\0" (- new-upper (+ HEADER-SIZE (length slots))))
+          (set slots (.. slots (pack :<I4I4 (. pair 1) (. pair 2))))))
+      (.. (pack :<I4I4I8 lower new-upper lsn) slots
+          (string.rep "\000" (- new-upper (+ HEADER-SIZE (length slots))))
           (table.concat (icollect [_ it (ipairs live)] it.bytes))))))
 
 (fn restore-slot [page n bytes]
@@ -173,16 +169,13 @@ must be reclaimed to fit `bytes`."
     (local slots-parts [])
     (for [i 0 (- new-cnt 1)]
       (if (= (+ i 1) n)
-          (table.insert slots-parts (pack "<I4I4" new-upper len))
+          (table.insert slots-parts (pack :<I4I4 new-upper len))
           (< i cnt)
           (let [(off slen) (slot-at p i)]
-            (table.insert slots-parts (pack "<I4I4" off slen)))
-          (table.insert slots-parts (pack "<I4I4" 0 0))))
-    (.. (pack "<I4I4I8" new-lower new-upper lsn)
-        (table.concat slots-parts)
-        (string.rep "\0" (- new-upper new-lower))
-        bytes
-        (p:sub (+ upper 1)))))
+            (table.insert slots-parts (pack :<I4I4 off slen)))
+          (table.insert slots-parts (pack :<I4I4 0 0))))
+    (.. (pack :<I4I4I8 new-lower new-upper lsn) (table.concat slots-parts)
+        (string.rep "\000" (- new-upper new-lower)) bytes (p:sub (+ upper 1)))))
 
 (fn each-item [page f]
   "Call f with each live item as item-number and bytes, in slot order."
@@ -191,10 +184,22 @@ must be reclaimed to fit `bytes`."
       (when (> len 0)
         (f (+ i 1) (page:sub (+ off 1) (+ off len)))))))
 
-{:BLKSZ BLKSZ :HEADER-SIZE HEADER-SIZE :SLOT-SIZE SLOT-SIZE
- :page-init page-init :header header :set-header set-header
- :get-lsn get-lsn :set-lsn set-lsn
- :slot-count slot-count :slot-at slot-at :set-slot-at set-slot-at
- :free-space free-space :live-count live-count :add-item add-item
- :get-item get-item :delete-item delete-item :compact compact
- :restore-slot restore-slot :each-item each-item}
+{: BLKSZ
+ : HEADER-SIZE
+ : SLOT-SIZE
+ : page-init
+ : header
+ : set-header
+ : get-lsn
+ : set-lsn
+ : slot-count
+ : slot-at
+ : set-slot-at
+ : free-space
+ : live-count
+ : add-item
+ : get-item
+ : delete-item
+ : compact
+ : restore-slot
+ : each-item}

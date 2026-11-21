@@ -4,7 +4,9 @@
 ;; levels hold separator keys only. Supports preemptive splits on insert and
 ;; full sibling borrow, merge, and root collapse on delete.
 
-(local T 2) ;; min degree: non-root nodes hold [T-1 .. 2T-1] keys
+(local T 2)
+
+;; min degree: non-root nodes hold [T-1 .. 2T-1] keys
 (local MAX-KEYS (- (* 2 T) 1))
 (local MIN-KEYS (- T 1))
 
@@ -42,16 +44,18 @@
   (local sep (. child.keys T))
   (local right (if child.leaf (new-leaf) {:leaf false :keys [] :children []}))
   (if child.leaf
-      (do (set right.keys (take child.keys T MAX-KEYS))
-          (set right.vals (take child.vals T MAX-KEYS))
-          (set child.keys (take child.keys 1 (- T 1)))
-          (set child.vals (take child.vals 1 (- T 1)))
-          (set right.next child.next)
-          (set child.next right))
-      (do (set right.keys (take child.keys (+ T 1) MAX-KEYS))
-          (set right.children (take child.children (+ T 1) (* 2 T)))
-          (set child.keys (take child.keys 1 (- T 1)))
-          (set child.children (take child.children 1 T))))
+      (do
+        (set right.keys (take child.keys T MAX-KEYS))
+        (set right.vals (take child.vals T MAX-KEYS))
+        (set child.keys (take child.keys 1 (- T 1)))
+        (set child.vals (take child.vals 1 (- T 1)))
+        (set right.next child.next)
+        (set child.next right))
+      (do
+        (set right.keys (take child.keys (+ T 1) MAX-KEYS))
+        (set right.children (take child.children (+ T 1) (* 2 T)))
+        (set child.keys (take child.keys 1 (- T 1)))
+        (set child.children (take child.children 1 T))))
   (table.insert parent.keys i sep)
   (table.insert parent.children (+ i 1) right))
 
@@ -120,21 +124,25 @@
     (if (and left (> (length left.keys) MIN-KEYS))
         ;; borrow from left
         (if child.leaf
-            (do (table.insert child.keys 1 (table.remove left.keys))
-                (table.insert child.vals 1 (table.remove left.vals))
-                (tset parent.keys (- i 1) (. child.keys 1)))
-            (do (table.insert child.keys 1 (. parent.keys (- i 1)))
-                (table.insert child.children 1 (table.remove left.children))
-                (tset parent.keys (- i 1) (table.remove left.keys))))
+            (do
+              (table.insert child.keys 1 (table.remove left.keys))
+              (table.insert child.vals 1 (table.remove left.vals))
+              (tset parent.keys (- i 1) (. child.keys 1)))
+            (do
+              (table.insert child.keys 1 (. parent.keys (- i 1)))
+              (table.insert child.children 1 (table.remove left.children))
+              (tset parent.keys (- i 1) (table.remove left.keys))))
         (and right (> (length right.keys) MIN-KEYS))
         ;; borrow from right
         (if child.leaf
-            (do (table.insert child.keys (table.remove right.keys 1))
-                (table.insert child.vals (table.remove right.vals 1))
-                (tset parent.keys i (. right.keys 1)))
-            (do (table.insert child.keys (. parent.keys i))
-                (table.insert child.children (table.remove right.children 1))
-                (tset parent.keys i (table.remove right.keys 1))))
+            (do
+              (table.insert child.keys (table.remove right.keys 1))
+              (table.insert child.vals (table.remove right.vals 1))
+              (tset parent.keys i (. right.keys 1)))
+            (do
+              (table.insert child.keys (. parent.keys i))
+              (table.insert child.children (table.remove right.children 1))
+              (tset parent.keys i (table.remove right.keys 1))))
         ;; merge with sibling
         (let [lidx (if (> i 1) (- i 1) i)
               l (. parent.children lidx)
@@ -142,24 +150,27 @@
               sep (table.remove parent.keys lidx)]
           (table.remove parent.children (+ lidx 1))
           (if l.leaf
-              (do (each [j k (ipairs r.keys)]
-                    (table.insert l.keys k)
-                    (table.insert l.vals (. r.vals j)))
-                  (set l.next r.next))
-              (do (table.insert l.keys sep)
-                  (each [_ k (ipairs r.keys)] (table.insert l.keys k))
-                  (each [_ c (ipairs r.children)] (table.insert l.children c))))))))
+              (do
+                (each [j k (ipairs r.keys)]
+                  (table.insert l.keys k)
+                  (table.insert l.vals (. r.vals j)))
+                (set l.next r.next))
+              (do
+                (table.insert l.keys sep)
+                (each [_ k (ipairs r.keys)] (table.insert l.keys k))
+                (each [_ c (ipairs r.children)] (table.insert l.children c))))))))
 
 (fn delete-at [node key]
   (if node.leaf
-      (do (var pos nil)
-          (each [i k (ipairs node.keys)]
-            (when (and (= pos nil) (= k key)) (set pos i)))
-          (if (= pos nil)
-              false
-              (do (table.remove node.keys pos)
-                  (table.remove node.vals pos)
-                  true)))
+      (do
+        (var pos nil)
+        (each [i k (ipairs node.keys)]
+          (when (and (= pos nil) (= k key)) (set pos i)))
+        (if (= pos nil) false
+            (do
+              (table.remove node.keys pos)
+              (table.remove node.vals pos)
+              true)))
       (let [i (descend-index node.keys key)
             deleted? (delete-at (. node.children i) key)]
         (when deleted? (rebalance-child node i))
@@ -174,5 +185,14 @@
     (set tree.root (. tree.root.children 1)))
   tree)
 
-{: T : MAX-KEYS : new : insert : search : range : pairs-all : delete
- : full? : find-index : descend-index}
+{: T
+ : MAX-KEYS
+ : new
+ : insert
+ : search
+ : range
+ : pairs-all
+ : delete
+ : full?
+ : find-index
+ : descend-index}

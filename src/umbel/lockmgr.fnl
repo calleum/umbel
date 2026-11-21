@@ -6,9 +6,13 @@
 ;; transaction coroutines, and atomic Strict-2PL release on commit/abort.
 
 (fn new []
-  {:locks {}       ;; resource -> {:mode :holders {txn->true} :waiters [...]}
-   :txn-locks {}   ;; txn -> {resource -> true}
-   :waiting-on {}}) ;; txn -> resource
+  {:locks {}
+   ;; resource -> {:mode :holders {txn->true} :waiters [...]}
+   :txn-locks {}
+   ;; txn -> {resource -> true}
+   :waiting-on {}})
+
+;; txn -> resource
 
 (fn holder-count [entry]
   (var n 0)
@@ -20,10 +24,8 @@
   (tset (. lm.txn-locks txn) resource true))
 
 (fn can-grant? [entry txn mode]
-  (if (or (= entry nil) (= (holder-count entry) 0))
-      true
-      (= entry.mode :exclusive)
-      (not= nil (. entry.holders txn))
+  (if (or (= entry nil) (= (holder-count entry) 0)) true
+      (= entry.mode :exclusive) (not= nil (. entry.holders txn))
       ;; entry.mode == :shared
       (if (= mode :shared)
           ;; Don't starve an exclusive waiter already queued.
@@ -36,14 +38,15 @@
   (local entry (. lm.locks resource))
   (if (= entry nil)
       false
-      (do (var other false)
-          (each [h _ (pairs entry.holders)]
-            (when (not= h txn) (set other true)))
-          other)))
+      (do
+        (var other false)
+        (each [h _ (pairs entry.holders)]
+          (when (not= h txn) (set other true)))
+        other)))
 
 (fn grant! [lm txn resource mode]
   (local entry (or (. lm.locks resource)
-                   (let [e {:mode mode :holders {} :waiters []}]
+                   (let [e {: mode :holders {} :waiters []}]
                      (tset lm.locks resource e)
                      e)))
   (when (= mode :exclusive) (set entry.mode :exclusive))
@@ -54,34 +57,38 @@
 (fn would-deadlock? [lm txn resource]
   "DFS over the wait-for graph: does waiting on `resource` reach `txn`?"
   (local visited {})
+
   (fn visit-resource [res]
     (local entry (. lm.locks res))
     (if (= entry nil)
         false
-        (do (var cycle false)
-            (each [holder _ (pairs entry.holders)]
-              (when (not cycle)
-                (if (= holder txn)
-                    (set cycle true)
-                    (when (not (. visited holder))
-                      (tset visited holder true)
-                      (local next-res (. lm.waiting-on holder))
-                      (when (and next-res (visit-resource next-res))
-                        (set cycle true))))))
-            cycle)))
+        (do
+          (var cycle false)
+          (each [holder _ (pairs entry.holders)]
+            (when (not cycle)
+              (if (= holder txn)
+                  (set cycle true)
+                  (when (not (. visited holder))
+                    (tset visited holder true)
+                    (local next-res (. lm.waiting-on holder))
+                    (when (and next-res (visit-resource next-res))
+                      (set cycle true))))))
+          cycle)))
+
   ;; Only check other holders (self-hold on upgrade isn't a cycle unless
   ;; another holder of `resource` waits on something `txn` holds).
   (local entry (. lm.locks resource))
   (if (= entry nil)
       false
-      (do (var cycle false)
-          (each [holder _ (pairs entry.holders)]
-            (when (and (not cycle) (not= holder txn))
-              (tset visited holder true)
-              (local next-res (. lm.waiting-on holder))
-              (when (and next-res (visit-resource next-res))
-                (set cycle true))))
-          cycle)))
+      (do
+        (var cycle false)
+        (each [holder _ (pairs entry.holders)]
+          (when (and (not cycle) (not= holder txn))
+            (tset visited holder true)
+            (local next-res (. lm.waiting-on holder))
+            (when (and next-res (visit-resource next-res))
+              (set cycle true))))
+        cycle)))
 
 (fn remove-waiter [entry co]
   (for [i (length entry.waiters) 1 -1]
@@ -96,19 +103,23 @@ or when opts.nowait is set (or called from the main thread)."
   (while (not acquired)
     (local entry (. lm.locks resource))
     (if (can-grant? entry txn mode)
-        (do (grant! lm txn resource mode)
-            (set acquired true))
-        (do (when (would-deadlock? lm txn resource)
-              (error (.. "lockmgr: deadlock detected for txn " txn " on " resource)))
-            (local (co main?) (coroutine.running))
-            (if (or main? (and opts opts.nowait))
-                (error (.. "lockmgr: lock conflict on " resource " for txn " txn))
-                (do (tset lm.waiting-on txn resource)
-                    (table.insert entry.waiters {:txn txn :mode mode :co co})
-                    (coroutine.yield {:blocked-on resource :txn txn})
-                    (tset lm.waiting-on txn nil)
-                    (local cur (. lm.locks resource))
-                    (when cur (remove-waiter cur co)))))))
+        (do
+          (grant! lm txn resource mode)
+          (set acquired true))
+        (do
+          (when (would-deadlock? lm txn resource)
+            (error (.. "lockmgr: deadlock detected for txn " txn " on "
+                       resource)))
+          (local (co main?) (coroutine.running))
+          (if (or main? (and opts opts.nowait))
+              (error (.. "lockmgr: lock conflict on " resource " for txn " txn))
+              (do
+                (tset lm.waiting-on txn resource)
+                (table.insert entry.waiters {: txn : mode : co})
+                (coroutine.yield {:blocked-on resource : txn})
+                (tset lm.waiting-on txn nil)
+                (local cur (. lm.locks resource))
+                (when cur (remove-waiter cur co)))))))
   true)
 
 (fn release-all [lm txn]
@@ -138,8 +149,8 @@ or when opts.nowait is set (or called from the main thread)."
   "Drive a list of transaction thunks cooperatively as coroutines until all
 finish (either succeeding or returning an error). Returns [{:ok :value} ...]."
   (local tasks
-    (icollect [_ f (ipairs fns)]
-      {:co (coroutine.create f) :done false :ok nil :value nil}))
+         (icollect [_ f (ipairs fns)]
+           {:co (coroutine.create f) :done false :ok nil :value nil}))
   (var remaining (length tasks))
   (var progress true)
   (while (and (> remaining 0) progress)
@@ -148,19 +159,20 @@ finish (either succeeding or returning an error). Returns [{:ok :value} ...]."
       (when (not task.done)
         (local (ok res) (coroutine.resume task.co))
         (if (not ok)
-            (do (set task.done true)
-                (set task.ok false)
-                (set task.value res)
-                (set remaining (- remaining 1))
-                (set progress true))
-            (= (coroutine.status task.co) "dead")
-            (do (set task.done true)
-                (set task.ok true)
-                (set task.value res)
-                (set remaining (- remaining 1))
-                (set progress true))
+            (do
+              (set task.done true)
+              (set task.ok false)
+              (set task.value res)
+              (set remaining (- remaining 1))
+              (set progress true))
+            (= (coroutine.status task.co) :dead)
+            (do
+              (set task.done true)
+              (set task.ok true)
+              (set task.value res)
+              (set remaining (- remaining 1))
+              (set progress true))
             (set progress true)))))
   tasks)
 
-{:new new :acquire acquire :release-all release-all :held-by held-by
- :locked-by-other? locked-by-other? :run-concurrent run-concurrent}
+{: new : acquire : release-all : held-by : locked-by-other? : run-concurrent}

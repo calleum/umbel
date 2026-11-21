@@ -22,7 +22,7 @@
 (local heapfile (require :umbel.heapfile))
 (local bufmgr (require :umbel.bufmgr))
 
-(local MAGIC "UBT2")
+(local MAGIC :UBT2)
 (local DEFAULT-CAP 250)
 (local KEYS-OFF 13)
 
@@ -38,7 +38,8 @@
 
 (fn check-cap [cap]
   (when (or (< cap 4) (> cap DEFAULT-CAP) (not= (% cap 2) 0))
-    (error (.. "btree-disk: cap must be even in [4, " DEFAULT-CAP "], got " (tostring cap))))
+    (error (.. "btree-disk: cap must be even in [4, " DEFAULT-CAP "], got "
+               (tostring cap))))
   cap)
 
 ;; -- node & free-page codecs ----------------------------------------------
@@ -46,45 +47,48 @@
 (fn encode-node [n cap]
   "Serialize a node table into its 4 KiB page image."
   (local c (or cap DEFAULT-CAP))
-  (local head (.. (pack "<BI2I4" (if n.leaf FLAG-LEAF FLAG-INTERNAL)
+  (local head (.. (pack :<BI2I4 (if n.leaf FLAG-LEAF FLAG-INTERNAL)
                         (length n.keys) (if n.leaf (or n.next 0) 0))
-                  (string.rep "\0" 5)))
-  (local key-parts (icollect [_ k (ipairs n.keys)] (pack "<i8" k)))
+                  (string.rep "\000" 5)))
+  (local key-parts (icollect [_ k (ipairs n.keys)] (pack :<i8 k)))
   (local keys (table.concat key-parts))
-  (local tail
-    (if n.leaf
-        (table.concat (icollect [_ v (ipairs n.vals)] (pack "<I4I4" v.page v.slot)))
-        (table.concat (icollect [_ ch (ipairs n.children)] (pack "<I4" ch)))))
-  (.. head keys (string.rep "\0" (- (* c 8) (length keys)))
-      tail (string.rep "\0" (- page.BLKSZ 12 (* c 8) (length tail)))))
+  (local tail (if n.leaf
+                  (table.concat (icollect [_ v (ipairs n.vals)]
+                                  (pack :<I4I4 v.page v.slot)))
+                  (table.concat (icollect [_ ch (ipairs n.children)]
+                                  (pack :<I4 ch)))))
+  (.. head keys (string.rep "\000" (- (* c 8) (length keys))) tail
+      (string.rep "\000" (- page.BLKSZ 12 (* c 8) (length tail)))))
 
 (fn decode-node [data cap]
   "Parse a 4 KiB page image back into a node table."
   (local c (or cap DEFAULT-CAP))
   (local voff (vals-off c))
-  (local (flags nkeys next) (unpack "<BI2I4" data 1))
+  (local (flags nkeys next) (unpack :<BI2I4 data 1))
   (local n {:leaf (= flags FLAG-LEAF) :keys []})
   (when n.leaf (set n.next next))
   (for [i 1 nkeys]
-    (let [(k) (unpack "<i8" data (+ KEYS-OFF (* (- i 1) 8)))]
+    (let [(k) (unpack :<i8 data (+ KEYS-OFF (* (- i 1) 8)))]
       (table.insert n.keys k)))
   (if n.leaf
-      (do (set n.vals [])
-          (for [i 1 nkeys]
-            (let [(pg slot) (unpack "<I4I4" data (+ voff (* (- i 1) 8)))]
-              (table.insert n.vals {:page pg :slot slot}))))
-      (do (set n.children [])
-          (for [i 1 (+ nkeys 1)]
-            (let [(cid) (unpack "<I4" data (+ voff (* (- i 1) 4)))]
-              (table.insert n.children cid)))))
+      (do
+        (set n.vals [])
+        (for [i 1 nkeys]
+          (let [(pg slot) (unpack :<I4I4 data (+ voff (* (- i 1) 8)))]
+            (table.insert n.vals {:page pg : slot}))))
+      (do
+        (set n.children [])
+        (for [i 1 (+ nkeys 1)]
+          (let [(cid) (unpack :<I4 data (+ voff (* (- i 1) 4)))]
+            (table.insert n.children cid)))))
   n)
 
 (fn encode-free [next-free]
-  (.. (pack "<BI2I4" FLAG-FREE 0 (or next-free 0))
-      (string.rep "\0" (- page.BLKSZ 7))))
+  (.. (pack :<BI2I4 FLAG-FREE 0 (or next-free 0))
+      (string.rep "\000" (- page.BLKSZ 7))))
 
 (fn decode-free-next [data]
-  (local (flags _ next) (unpack "<BI2I4" data 1))
+  (local (flags _ next) (unpack :<BI2I4 data 1))
   (when (not= flags FLAG-FREE)
     (error "btree-disk: corrupt free-page list entry"))
   next)
@@ -92,24 +96,23 @@
 ;; -- meta page ------------------------------------------------------------
 
 (fn encode-meta [m]
-  (.. MAGIC
-      (pack "<I4I4i8I4I4I2" m.root m.first-leaf m.count
-            m.free-head m.free-count m.cap)
-      (string.rep "\0" (- page.BLKSZ 30))))
+  (.. MAGIC (pack :<I4I4i8I4I4I2 m.root m.first-leaf m.count m.free-head
+                  m.free-count m.cap)
+      (string.rep "\000" (- page.BLKSZ 30))))
 
 (fn decode-meta [data]
   (when (not= (data:sub 1 4) MAGIC)
     (error "btree-disk: not an umbel index file"))
-  (let [(root first-leaf count free-head free-count cap)
-        (unpack "<I4I4i8I4I4I2" data 5)]
-    {:root root :first-leaf first-leaf :count count
-     :free-head free-head :free-count free-count :cap cap}))
+  (let [(root first-leaf count free-head free-count cap) (unpack :<I4I4i8I4I4I2
+                                                                 data 5)]
+    {: root : first-leaf : count : free-head : free-count : cap}))
 
 ;; -- engine lifecycle & page allocation -----------------------------------
 
 (fn file-exists? [path]
-  (let [f (io.open path "r")]
-    (if f (do (f:close) true) false)))
+  (let [f (io.open path :r)]
+    (if f (do
+            (f:close) true) false)))
 
 (fn open [path opts]
   "Open or create the index file at path.
@@ -117,19 +120,33 @@ Optional opts.cap sets node capacity (even, 4..250, default 250)."
   (local existed (file-exists? path))
   (local hf (heapfile.open path))
   (local buf (bufmgr.new (or (when opts opts.pool-size) 32)))
-  (local meta
-    (if existed
-        (decode-meta (heapfile.read-page hf 0))
-        (let [cap (check-cap (or (when opts opts.cap) DEFAULT-CAP))
-              m {:root 1 :first-leaf 1 :count 0
-                 :free-head 0 :free-count 0 :cap cap}]
-          (heapfile.extend hf (encode-meta m))
-          (heapfile.extend hf (encode-node {:leaf true :keys [] :vals [] :next 0} cap))
-          (heapfile.sync hf)
-          m)))
+  (local meta (if existed
+                  (decode-meta (heapfile.read-page hf 0))
+                  (let [cap (check-cap (or (when opts opts.cap) DEFAULT-CAP))
+                        m {:root 1
+                           :first-leaf 1
+                           :count 0
+                           :free-head 0
+                           :free-count 0
+                           : cap}]
+                    (heapfile.extend hf (encode-meta m))
+                    (heapfile.extend hf
+                                     (encode-node {:leaf true
+                                                   :keys []
+                                                   :vals []
+                                                   :next 0}
+                                                  cap))
+                    (heapfile.sync hf)
+                    m)))
   (local half (// meta.cap 2))
-  {:hf hf :buf buf :meta meta :path path
-   :cap meta.cap :half half :min-leaf half :min-internal (- half 1)})
+  {: hf
+   : buf
+   : meta
+   : path
+   :cap meta.cap
+   : half
+   :min-leaf half
+   :min-internal (- half 1)})
 
 (fn node-load [idx node-id]
   (local s (bufmgr.get-page idx.buf idx.hf node-id))
@@ -203,16 +220,18 @@ internal nodes move keys[half] up leaving [1..half-1] and [half+1..cap]."
                    {:leaf true :keys [] :vals [] :next child.next}
                    {:leaf false :keys [] :children []}))
   (if child.leaf
-      (do (set sep (. child.keys (+ half 1)))
-          (set right.keys (take child.keys (+ half 1) cap))
-          (set right.vals (take child.vals (+ half 1) cap))
-          (set child.keys (take child.keys 1 half))
-          (set child.vals (take child.vals 1 half)))
-      (do (set sep (. child.keys half))
-          (set right.keys (take child.keys (+ half 1) cap))
-          (set right.children (take child.children (+ half 1) (+ cap 1)))
-          (set child.keys (take child.keys 1 (- half 1)))
-          (set child.children (take child.children 1 half))))
+      (do
+        (set sep (. child.keys (+ half 1)))
+        (set right.keys (take child.keys (+ half 1) cap))
+        (set right.vals (take child.vals (+ half 1) cap))
+        (set child.keys (take child.keys 1 half))
+        (set child.vals (take child.vals 1 half)))
+      (do
+        (set sep (. child.keys half))
+        (set right.keys (take child.keys (+ half 1) cap))
+        (set right.children (take child.children (+ half 1) (+ cap 1)))
+        (set child.keys (take child.keys 1 (- half 1)))
+        (set child.children (take child.children 1 half))))
   (local right-id (node-alloc idx right))
   (when child.leaf (set child.next right-id))
   (node-save idx left-id child)
@@ -238,14 +257,16 @@ internal nodes move keys[half] up leaving [1..half-1] and [half+1..cap]."
 (fn insert-nonfull [idx node-id key tid]
   (local n (node-load idx node-id))
   (if n.leaf
-      (do (leaf-insert n key tid)
-          (node-save idx node-id n))
-      (do (var i (descend n key))
-          (when (full? idx (node-load idx (. n.children i)))
-            (split-child idx n i)
-            (node-save idx node-id n)
-            (when (>= key (. n.keys i)) (set i (+ i 1))))
-          (insert-nonfull idx (. n.children i) key tid))))
+      (do
+        (leaf-insert n key tid)
+        (node-save idx node-id n))
+      (do
+        (var i (descend n key))
+        (when (full? idx (node-load idx (. n.children i)))
+          (split-child idx n i)
+          (node-save idx node-id n)
+          (when (>= key (. n.keys i)) (set i (+ i 1))))
+        (insert-nonfull idx (. n.children i) key tid))))
 
 (fn insert [idx key tid]
   "Insert key -> {page slot} TupleId."
@@ -302,13 +323,15 @@ the right page."
   (local sep (table.remove parent.keys left-idx))
   (table.remove parent.children (+ left-idx 1))
   (if left.leaf
-      (do (each [j k (ipairs right.keys)]
-            (table.insert left.keys k)
-            (table.insert left.vals (. right.vals j)))
-          (set left.next right.next))
-      (do (table.insert left.keys sep)
-          (each [_ k (ipairs right.keys)] (table.insert left.keys k))
-          (each [_ c (ipairs right.children)] (table.insert left.children c))))
+      (do
+        (each [j k (ipairs right.keys)]
+          (table.insert left.keys k)
+          (table.insert left.vals (. right.vals j)))
+        (set left.next right.next))
+      (do
+        (table.insert left.keys sep)
+        (each [_ k (ipairs right.keys)] (table.insert left.keys k))
+        (each [_ c (ipairs right.children)] (table.insert left.children c))))
   (node-save idx left-id left)
   (node-free idx right-id)
   (node-save idx parent._id parent))
@@ -322,7 +345,8 @@ the right page."
     (local left (when left-id (node-load idx left-id)))
     (if (and left (> (length left.keys) min-k))
         (borrow-from-left idx parent i left-id left child-id child)
-        (let [right-id (when (<= i (length parent.keys)) (. parent.children (+ i 1)))
+        (let [right-id (when (<= i (length parent.keys))
+                         (. parent.children (+ i 1)))
               right (when right-id (node-load idx right-id))]
           (if (and right (> (length right.keys) min-k))
               (borrow-from-right idx parent i child-id child right-id right)
@@ -332,15 +356,16 @@ the right page."
   (local n (node-load idx node-id))
   (set n._id node-id)
   (if n.leaf
-      (do (var pos nil)
-          (each [i k (ipairs n.keys)]
-            (when (and (= pos nil) (= k key)) (set pos i)))
-          (if (= pos nil)
-              false
-              (do (table.remove n.keys pos)
-                  (table.remove n.vals pos)
-                  (node-save idx node-id n)
-                  true)))
+      (do
+        (var pos nil)
+        (each [i k (ipairs n.keys)]
+          (when (and (= pos nil) (= k key)) (set pos i)))
+        (if (= pos nil) false
+            (do
+              (table.remove n.keys pos)
+              (table.remove n.vals pos)
+              (node-save idx node-id n)
+              true)))
       (let [i (descend n key)
             deleted? (delete-at idx (. n.children i) key)]
         (when deleted?
@@ -386,8 +411,9 @@ Returns true when the key existed and was removed, false otherwise."
       (when (and (not stop) (>= k lo) (<= k hi))
         (table.insert out [k (. leaf.vals i)])))
     (if (and (not stop) leaf.leaf (> (or leaf.next 0) 0))
-        (do (set leaf (node-load idx leaf.next))
-            (when (not leaf.leaf) (set leaf nil)))
+        (do
+          (set leaf (node-load idx leaf.next))
+          (when (not leaf.leaf) (set leaf nil)))
         (set leaf nil)))
   out)
 
@@ -400,8 +426,10 @@ leaf-chain equivalence, and live/free page disjointness)."
   (local live-pages {})
   (local dfs-keys [])
   (var leaf-depth nil)
+
   (fn walk [pid depth lo hi is-root]
-    (when (. live-pages pid) (error (.. "btree-disk.verify: duplicate page " pid)))
+    (when (. live-pages pid)
+      (error (.. "btree-disk.verify: duplicate page " pid)))
     (tset live-pages pid true)
     (local n (node-load idx pid))
     (when (> (length n.keys) idx.cap)
@@ -409,7 +437,8 @@ leaf-chain equivalence, and live/free page disjointness)."
     (when (not is-root)
       (local min-k (if n.leaf idx.min-leaf idx.min-internal))
       (when (< (length n.keys) min-k)
-        (error (.. "btree-disk.verify: underflow on page " pid " (" (length n.keys) " < " min-k ")"))))
+        (error (.. "btree-disk.verify: underflow on page " pid " ("
+                   (length n.keys) " < " min-k ")"))))
     (for [i 1 (length n.keys)]
       (local k (. n.keys i))
       (when (and (> i 1) (<= k (. n.keys (- i 1))))
@@ -419,20 +448,24 @@ leaf-chain equivalence, and live/free page disjointness)."
       (when (and hi (>= k hi))
         (error (.. "btree-disk.verify: key " k " >= upper bound " hi))))
     (if n.leaf
-        (do (if (= leaf-depth nil)
-                (set leaf-depth depth)
-                (when (not= leaf-depth depth)
-                  (error "btree-disk.verify: unbalanced leaf depth")))
-            (each [_ k (ipairs n.keys)] (table.insert dfs-keys k)))
-        (do (when (not= (length n.children) (+ (length n.keys) 1))
-              (error (.. "btree-disk.verify: bad child count on page " pid)))
-            (for [i 1 (length n.children)]
-              (local child-lo (if (> i 1) (. n.keys (- i 1)) lo))
-              (local child-hi (if (<= i (length n.keys)) (. n.keys i) hi))
-              (walk (. n.children i) (+ depth 1) child-lo child-hi false)))))
+        (do
+          (if (= leaf-depth nil)
+              (set leaf-depth depth)
+              (when (not= leaf-depth depth)
+                (error "btree-disk.verify: unbalanced leaf depth")))
+          (each [_ k (ipairs n.keys)] (table.insert dfs-keys k)))
+        (do
+          (when (not= (length n.children) (+ (length n.keys) 1))
+            (error (.. "btree-disk.verify: bad child count on page " pid)))
+          (for [i 1 (length n.children)]
+            (local child-lo (if (> i 1) (. n.keys (- i 1)) lo))
+            (local child-hi (if (<= i (length n.keys)) (. n.keys i) hi))
+            (walk (. n.children i) (+ depth 1) child-lo child-hi false)))))
+
   (walk idx.meta.root 0 nil nil true)
   (when (not= (length dfs-keys) idx.meta.count)
-    (error (.. "btree-disk.verify: count mismatch " (length dfs-keys) " vs " idx.meta.count)))
+    (error (.. "btree-disk.verify: count mismatch " (length dfs-keys) " vs "
+               idx.meta.count)))
   ;; Verify leaf-chain matches DFS order exactly.
   (local chain (pairs-all idx))
   (when (not= (length chain) (length dfs-keys))
@@ -457,7 +490,16 @@ leaf-chain equivalence, and live/free page disjointness)."
     (error "btree-disk.verify: free-count mismatch"))
   {:height (or leaf-depth 0) :keys (length dfs-keys) :free-pages fcnt})
 
-{:CAP DEFAULT-CAP :open open :flush flush :close close :count count
- :insert insert :delete delete :search search :range range
- :pairs-all pairs-all :verify verify
- :encode-node-for-test encode-node :decode-node-for-test decode-node}
+{:CAP DEFAULT-CAP
+ : open
+ : flush
+ : close
+ : count
+ : insert
+ : delete
+ : search
+ : range
+ : pairs-all
+ : verify
+ :encode-node-for-test encode-node
+ :decode-node-for-test decode-node}

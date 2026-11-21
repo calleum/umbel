@@ -97,9 +97,11 @@
     (os.remove idxfile)
     ;; Small cap=6 forces a 3+ level tree, heavily exercising borrow/merge/collapse.
     (local idx (btd.open idxfile {:cap 6}))
-    (for [i 1 300] (btd.insert idx i {:page (+ 2 (// i 20)) :slot (% i 19)}))
+    (for [i 1 300]
+      (btd.insert idx i {:page (+ 2 (// i 20)) :slot (% i 19)}))
     (local v1 (btd.verify idx))
-    (t.assert= true (>= v1.height 2) "300 keys with cap=6 builds multi-level tree")
+    (t.assert= true (>= v1.height 2)
+               "300 keys with cap=6 builds multi-level tree")
     ;; Delete odd keys and a contiguous middle block.
     (for [i 1 300 2]
       (t.assert= true (btd.delete idx i) (.. "delete odd " i)))
@@ -116,7 +118,8 @@
     (local v-empty (btd.verify idx))
     (t.assert= 0 (btd.count idx) "tree completely empty")
     (t.assert= 0 v-empty.height "root collapsed to single empty leaf")
-    (t.assert= true (> v-empty.free-pages 0) "merged pages reclaimed onto free list")
+    (t.assert= true (> v-empty.free-pages 0)
+               "merged pages reclaimed onto free list")
     ;; Tree remains usable and persists across close/reopen.
     (for [i 1 50] (btd.insert idx (* i 10) {:page 2 :slot i}))
     (btd.verify idx)
@@ -154,7 +157,8 @@
   (fn []
     (os.remove idxfile)
     (local idx (btd.open idxfile))
-    (for [i 1 2000] (btd.insert idx i {:page (+ 2 (// i 100)) :slot (+ (% i 100) 1)}))
+    (for [i 1 2000]
+      (btd.insert idx i {:page (+ 2 (// i 100)) :slot (+ (% i 100) 1)}))
     (btd.verify idx)
     (for [i 1 1500] (btd.delete idx i))
     (btd.verify idx)
@@ -162,9 +166,11 @@
     (btd.verify idx)
     (btd.close idx)
     (local idx2 (btd.open idxfile))
-    (t.assert= 1000 (btd.count idx2) "1000 live keys survive full-cap churn + reopen")
+    (t.assert= 1000 (btd.count idx2)
+               "1000 live keys survive full-cap churn + reopen")
     (btd.verify idx2)
-    (t.assert= 7 (. (btd.search idx2 250) :page) "re-inserted key has updated tid")
+    (t.assert= 7 (. (btd.search idx2 250) :page)
+               "re-inserted key has updated tid")
     (t.assert-nil (btd.search idx2 1000) "deleted key remains absent")
     (btd.close idx2)
     (os.remove idxfile)))

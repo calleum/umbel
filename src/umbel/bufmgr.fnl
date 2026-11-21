@@ -17,10 +17,13 @@ Optional opts.before-write(page-id, data) runs before any dirty write/eviction
 so the WAL rule (flushed_lsn >= page_lsn) is enforced."
   (local slots [])
   (for [i 1 pool-size]
-    (table.insert slots {:valid false :page-id -1 :data "" :dirty false
-                         :pin 0 :usage 0}))
-  {: pool-size :hand 0 :slots slots
-   :before-write (when opts opts.before-write)})
+    (table.insert slots {:valid false
+                         :page-id -1
+                         :data ""
+                         :dirty false
+                         :pin 0
+                         :usage 0}))
+  {: pool-size :hand 0 : slots :before-write (when opts opts.before-write)})
 
 (fn find-slot [buf page-id]
   (var found nil)
@@ -50,9 +53,10 @@ so the WAL rule (flushed_lsn >= page_lsn) is enforced."
   "Return a pinned buffer slot holding page-id of heap file hf."
   (let [s (find-slot buf page-id)]
     (if s
-        (do (set s.pin (+ s.pin 1))
-            (when (< s.usage MAX-USAGE) (set s.usage (+ s.usage 1)))
-            s)
+        (do
+          (set s.pin (+ s.pin 1))
+          (when (< s.usage MAX-USAGE) (set s.usage (+ s.usage 1)))
+          s)
         (let [v (victim buf)]
           (when (and v.valid v.dirty)
             (when buf.before-write (buf.before-write v.page-id v.data))
@@ -98,6 +102,11 @@ so the WAL rule (flushed_lsn >= page_lsn) is enforced."
   (icollect [_ s (ipairs buf.slots)]
     (when s.valid s.page-id)))
 
-{:new new :get-page get-page :release release :flush-slot flush-slot
- :flush-all flush-all :pinned-count pinned-count :dirty-count dirty-count
- :resident-ids resident-ids}
+{: new
+ : get-page
+ : release
+ : flush-slot
+ : flush-all
+ : pinned-count
+ : dirty-count
+ : resident-ids}

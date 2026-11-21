@@ -7,14 +7,13 @@
 (local table-m (require :umbel.table))
 (local heapfile (require :umbel.heapfile))
 
-(local tmpdir (os.getenv "TMPDIR"))
-(local dir (if (and tmpdir (not= tmpdir "")) tmpdir "/tmp"))
-(local dbfile (.. dir "/umbel-test-wal.db"))
-(local walfile (.. dir "/umbel-test-wal.wal"))
+(local tmpdir (os.getenv :TMPDIR))
+(local dir (if (and tmpdir (not= tmpdir "")) tmpdir :/tmp))
+(local dbfile (.. dir :/umbel-test-wal.db))
+(local walfile (.. dir :/umbel-test-wal.wal))
 
-(local item-schema
-  [{:name "id" :type :uint64}
-   {:name "name" :type :string :size 16}])
+(local item-schema [{:name :id :type :uint64}
+                    {:name :name :type :string :size 16}])
 
 (fn cleanup []
   (os.remove dbfile)
@@ -32,7 +31,8 @@
     (cleanup)
     (local tbl (table-m.create dbfile item-schema {:wal walfile}))
     (for [i 1 5]
-      (table-m.insert tbl (schema.encode item-schema {:id i :name (.. "row-" i)})))
+      (table-m.insert tbl
+                      (schema.encode item-schema {:id i :name (.. :row- i)})))
     ;; Simulate crash: close raw handles without flushing dirty buffer pool.
     (wal.close tbl.wal)
     (heapfile.close tbl.hf)
@@ -53,13 +53,13 @@
   (fn []
     (cleanup)
     (local tbl (table-m.create dbfile item-schema {:wal walfile}))
-    (table-m.insert tbl (schema.encode item-schema {:id 1 :name "committed-1"}))
-    (table-m.insert tbl (schema.encode item-schema {:id 2 :name "committed-2"}))
+    (table-m.insert tbl (schema.encode item-schema {:id 1 :name :committed-1}))
+    (table-m.insert tbl (schema.encode item-schema {:id 2 :name :committed-2}))
     (table-m.checkpoint tbl)
     ;; Explicit transaction mutates + flushes dirty pages, then crashes!
     (local tx (table-m.begin-txn tbl))
-    (table-m.insert tbl (schema.encode item-schema {:id 3 :name "ghost-3"}) tx)
-    (table-m.insert tbl (schema.encode item-schema {:id 4 :name "ghost-4"}) tx)
+    (table-m.insert tbl (schema.encode item-schema {:id 3 :name :ghost-3}) tx)
+    (table-m.insert tbl (schema.encode item-schema {:id 4 :name :ghost-4}) tx)
     (table-m.flush tbl true)
     (wal.close tbl.wal)
     (heapfile.close tbl.hf)
@@ -80,17 +80,18 @@
     (cleanup)
     (local tbl (table-m.create dbfile item-schema {:wal walfile}))
     (local keep-tid
-      (table-m.insert tbl (schema.encode item-schema {:id 10 :name "base"})))
+           (table-m.insert tbl (schema.encode item-schema {:id 10 :name :base})))
     (table-m.checkpoint tbl)
     ;; T1 and T2 interleave on the SAME data page (page 2):
     ;; T1 inserts id=11 and deletes id=10 (loser: never commits)
     ;; T2 inserts id=20 and id=21 (winner: commits!)
     (local t1 (table-m.begin-txn tbl))
     (local t2 (table-m.begin-txn tbl))
-    (table-m.insert tbl (schema.encode item-schema {:id 11 :name "loser-ins"}) t1)
-    (table-m.insert tbl (schema.encode item-schema {:id 20 :name "winner-1"}) t2)
+    (table-m.insert tbl (schema.encode item-schema {:id 11 :name :loser-ins})
+                    t1)
+    (table-m.insert tbl (schema.encode item-schema {:id 20 :name :winner-1}) t2)
     (table-m.delete tbl keep-tid t1)
-    (table-m.insert tbl (schema.encode item-schema {:id 21 :name "winner-2"}) t2)
+    (table-m.insert tbl (schema.encode item-schema {:id 21 :name :winner-2}) t2)
     (table-m.commit-txn tbl t2)
     ;; Force dirty page to disk and crash with T1 still active!
     (table-m.flush tbl true)
@@ -111,12 +112,12 @@
   (fn []
     (cleanup)
     (local tbl (table-m.create dbfile item-schema {:wal walfile}))
-    (table-m.insert tbl (schema.encode item-schema {:id 1 :name "keep"}))
+    (table-m.insert tbl (schema.encode item-schema {:id 1 :name :keep}))
     (table-m.checkpoint tbl)
     (local tx (table-m.begin-txn tbl))
-    (table-m.insert tbl (schema.encode item-schema {:id 2 :name "u1"}) tx)
-    (table-m.insert tbl (schema.encode item-schema {:id 3 :name "u2"}) tx)
-    (table-m.insert tbl (schema.encode item-schema {:id 4 :name "u3"}) tx)
+    (table-m.insert tbl (schema.encode item-schema {:id 2 :name :u1}) tx)
+    (table-m.insert tbl (schema.encode item-schema {:id 3 :name :u2}) tx)
+    (table-m.insert tbl (schema.encode item-schema {:id 4 :name :u3}) tx)
     (table-m.flush tbl true)
     (wal.close tbl.wal)
     (heapfile.close tbl.hf)
@@ -138,7 +139,8 @@
     (t.assert= 0 s3.undone "pass 3 has nothing left to undo")
     (local back (table-m.open dbfile nil {:wal walfile}))
     (local ids (scan-ids back))
-    (t.assert= 1 (length ids) "only committed row survives double-crash recovery")
+    (t.assert= 1 (length ids)
+               "only committed row survives double-crash recovery")
     (t.assert= 1 (. ids 1) "committed row intact")
     (table-m.close back)
     (cleanup)))
@@ -151,10 +153,12 @@
     (local tx (table-m.begin-txn tbl))
     ;; Insert enough rows to spill across >3 pages (each record is 24 bytes + 8 slot = 32 bytes; ~127/page).
     (for [i 1 300]
-      (table-m.insert tbl (schema.encode item-schema {:id i :name (.. "p" i)}) tx))
+      (table-m.insert tbl (schema.encode item-schema {:id i :name (.. :p i)})
+                      tx))
     ;; Read page 2 straight from disk: it must have been evicted AND its pageLSN <= wal.flushed-lsn.
     (local disk-p2 (heapfile.read-page tbl.hf 2))
-    (t.assert= true (> (page.get-lsn disk-p2) 0) "evicted page carries non-zero pageLSN")
+    (t.assert= true (> (page.get-lsn disk-p2) 0)
+               "evicted page carries non-zero pageLSN")
     (t.assert= true (>= tbl.wal.flushed-lsn (page.get-lsn disk-p2))
                "WAL was fdatasynced before dirty page eviction")
     (table-m.abort-txn tbl tx)
@@ -166,11 +170,12 @@
   (fn []
     (cleanup)
     (local tbl (table-m.create dbfile item-schema {:wal walfile}))
-    (table-m.insert tbl (schema.encode item-schema {:id 1 :name "before-ckpt"}))
-    (table-m.close tbl) ;; fsyncs data then writes clean checkpoint
+    (table-m.insert tbl (schema.encode item-schema {:id 1 :name :before-ckpt}))
+    (table-m.close tbl)
+    ;; fsyncs data then writes clean checkpoint
     ;; Append a torn/corrupt tail frame to simulate mid-write power loss.
-    (local f (io.open walfile "ab"))
-    (f:write "UW\153\0\0\0trunc")
+    (local f (io.open walfile :ab))
+    (f:write "UW\153\000\000\000trunc")
     (f:close)
     (local hf (heapfile.open dbfile))
     (local stats (wal.recover walfile hf))
