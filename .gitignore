@@ -1,0 +1,5 @@
+*.db
+*.idx
+*.wal
+*.lua
+/data/
