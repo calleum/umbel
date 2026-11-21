@@ -16,6 +16,8 @@
 (require :test-btree)
 (print "btree-disk")
 (require :test-btree-disk)
+(print "repl")
+(require :test-repl)
 (print "")
 
 (local code (t.summary))
