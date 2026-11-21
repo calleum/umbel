@@ -238,6 +238,7 @@
   (if (and tid (table-m.read entry.tbl tid))
       (do
         (table-m.delete entry.tbl tid)
+        (btd.delete entry.idx key)
         (string.format "deleted [%d:%d]" tid.page tid.slot))
       "not found"))
 

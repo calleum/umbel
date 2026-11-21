@@ -68,5 +68,10 @@
     (var lines 0)
     (each [_ (ranged:gmatch "[^\n]+")] (set lines (+ lines 1)))
     (t.assert= 3 lines "deleted row hidden from RANGE")
+    ;; Deleting also removes from disk B+ tree, allowing clean key reuse.
+    (repl.eval db "INSERT payments 50 \"Reborn 5\" 1700000999 555")
+    (local reborn (repl.eval db "FIND payments 50"))
+    (t.assert= true (not= nil (reborn:find "name=\"Reborn 5\""))
+               "deleted primary key can be re-inserted cleanly")
     (repl.close db)
     (os.execute (.. "rm -rf '" (dbdir:gsub "'" "'\\''") "'"))))

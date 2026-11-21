@@ -91,3 +91,80 @@
     (t.assert= 0 (length none) "empty range is empty")
     (btd.close idx)
     (os.remove idxfile)))
+
+(t.deftest "btree-disk: deep multi-level delete, borrow, merge, root collapse"
+  (fn []
+    (os.remove idxfile)
+    ;; Small cap=6 forces a 3+ level tree, heavily exercising borrow/merge/collapse.
+    (local idx (btd.open idxfile {:cap 6}))
+    (for [i 1 300] (btd.insert idx i {:page (+ 2 (// i 20)) :slot (% i 19)}))
+    (local v1 (btd.verify idx))
+    (t.assert= true (>= v1.height 2) "300 keys with cap=6 builds multi-level tree")
+    ;; Delete odd keys and a contiguous middle block.
+    (for [i 1 300 2]
+      (t.assert= true (btd.delete idx i) (.. "delete odd " i)))
+    (t.assert= false (btd.delete idx 1) "deleting absent key returns false")
+    (btd.verify idx)
+    (t.assert= 150 (btd.count idx) "150 even keys left")
+    ;; Re-insert deleted keys with updated tids.
+    (for [i 1 300 2]
+      (btd.insert idx i {:page 99 :slot (% i 11)}))
+    (btd.verify idx)
+    (t.assert= 300 (btd.count idx) "re-inserted keys restore count")
+    ;; Delete ALL 300 keys in reverse -> root must collapse back to height 0!
+    (for [i 300 1 -1] (btd.delete idx i))
+    (local v-empty (btd.verify idx))
+    (t.assert= 0 (btd.count idx) "tree completely empty")
+    (t.assert= 0 v-empty.height "root collapsed to single empty leaf")
+    (t.assert= true (> v-empty.free-pages 0) "merged pages reclaimed onto free list")
+    ;; Tree remains usable and persists across close/reopen.
+    (for [i 1 50] (btd.insert idx (* i 10) {:page 2 :slot i}))
+    (btd.verify idx)
+    (btd.close idx)
+    (local idx2 (btd.open idxfile))
+    (t.assert= 50 (btd.count idx2) "post-collapse keys survive reopen")
+    (btd.verify idx2)
+    (btd.close idx2)
+    (os.remove idxfile)))
+
+(t.deftest "btree-disk: heavy churn reclaims pages with zero file growth"
+  (fn []
+    (os.remove idxfile)
+    (local heapfile (require :umbel.heapfile))
+    (local idx (btd.open idxfile {:cap 8}))
+    (var baseline-pages nil)
+    ;; 8 rounds x 250 insert + 250 delete = 4,000 mutations!
+    (for [round 1 8]
+      (for [i 1 250]
+        (btd.insert idx (+ (* round 1000) i) {:page 2 :slot (% i 31)}))
+      (btd.verify idx)
+      (when (= round 1)
+        (set baseline-pages (heapfile.num-pages idx.hf)))
+      (for [i 1 250]
+        (btd.delete idx (+ (* round 1000) i)))
+      (btd.verify idx))
+    (local final-pages (heapfile.num-pages idx.hf))
+    (t.assert= 0 (btd.count idx) "empty after 8 churn rounds")
+    (t.assert= baseline-pages final-pages
+               "index file did not grow past round 1 (all freed pages reused)")
+    (btd.close idx)
+    (os.remove idxfile)))
+
+(t.deftest "btree-disk: full-capacity (CAP=250) heavy churn & persistence"
+  (fn []
+    (os.remove idxfile)
+    (local idx (btd.open idxfile))
+    (for [i 1 2000] (btd.insert idx i {:page (+ 2 (// i 100)) :slot (+ (% i 100) 1)}))
+    (btd.verify idx)
+    (for [i 1 1500] (btd.delete idx i))
+    (btd.verify idx)
+    (for [i 1 500] (btd.insert idx i {:page 7 :slot i}))
+    (btd.verify idx)
+    (btd.close idx)
+    (local idx2 (btd.open idxfile))
+    (t.assert= 1000 (btd.count idx2) "1000 live keys survive full-cap churn + reopen")
+    (btd.verify idx2)
+    (t.assert= 7 (. (btd.search idx2 250) :page) "re-inserted key has updated tid")
+    (t.assert-nil (btd.search idx2 1000) "deleted key remains absent")
+    (btd.close idx2)
+    (os.remove idxfile)))

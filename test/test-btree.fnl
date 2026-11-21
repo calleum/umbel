@@ -70,3 +70,15 @@
     ;; tree still usable afterwards
     (btree.insert tr 99 :back)
     (t.assert= :back (btree.search tr 99) "tree reusable after emptying")))
+
+(t.deftest "btree: heavy churn insert/delete/re-insert preserves sorted order"
+  (fn []
+    (local tr (btree.new))
+    (for [round 1 4]
+      (for [i 1 200]
+        (btree.insert tr (+ (* round 1000) (% (* i 73) 200)) i))
+      (t.assert= 200 tr.count "200 inserted in scrambled order")
+      (for [i 1 200]
+        (btree.delete tr (+ (* round 1000) (% (* i 37) 200))))
+      (t.assert= 0 tr.count "all 200 deleted via O(log N) borrow/merge")
+      (t.assert= true tr.root.leaf "root collapsed back to leaf"))))
