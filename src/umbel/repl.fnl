@@ -101,15 +101,16 @@
 
 (fn table-paths [db name]
   (values (.. db.dir "/" name ".db")
-          (.. db.dir "/" name ".idx")))
+          (.. db.dir "/" name ".idx")
+          (.. db.dir "/" name ".wal")))
 
 (fn get-table [db name]
   (check-ident name "table name")
   (or (. db.tables name)
-      (let [(db-path idx-path) (table-paths db name)]
+      (let [(db-path idx-path wal-path) (table-paths db name)]
         (when (not (file-exists? db-path))
           (error (.. "unknown table: " name)))
-        (local tbl (table-m.open db-path nil))
+        (local tbl (table-m.open db-path nil {:wal wal-path}))
         (local kf (key-field-of tbl.schema))
         (local idx (when kf (btd.open idx-path)))
         (local entry {:tbl tbl :idx idx :key-field kf})
@@ -149,7 +150,7 @@
   (local name (check-ident (. args 2) "table name"))
   (when (< (length args) 3)
     (error "CREATE needs at least one column spec"))
-  (local (db-path idx-path) (table-paths db name))
+  (local (db-path idx-path wal-path) (table-paths db name))
   (when (or (. db.tables name) (file-exists? db-path))
     (error (.. "table already exists: " name)))
   (local sch [])
@@ -159,7 +160,7 @@
       (when (. seen f.name) (error (.. "duplicate column: " f.name)))
       (tset seen f.name true)
       (table.insert sch f)))
-  (local tbl (table-m.create db-path sch))
+  (local tbl (table-m.create db-path sch {:wal wal-path}))
   (local kf (key-field-of sch))
   (local idx (when kf (btd.open idx-path)))
   (tset db.tables name {:tbl tbl :idx idx :key-field kf})

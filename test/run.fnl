@@ -18,6 +18,8 @@
 (require :test-btree-disk)
 (print "repl")
 (require :test-repl)
+(print "wal")
+(require :test-wal)
 (print "")
 
 (local code (t.summary))
