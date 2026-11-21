@@ -2,11 +2,9 @@
 ;;
 ;; A schema is a vector of fields {:name :type :size}. Supported types:
 ;; :int32 :uint32 :int64 :uint64 :string (fixed width, zero padded).
-;; Records are packed little endian with string.pack — the Lua-native
-;; equivalent of the C engine's hand-rolled LE byte helpers.
+;; Records are packed little endian with string.pack.
 ;;
-;; The catalog encodes a schema onto a page so tables persist their own
-;; shape (roadmap task 4.3):
+;; The catalog encodes a schema onto a page so tables persist their own shape:
 ;;
 ;;   magic "UMBL" | version u16 | field-count u16
 ;;   then per field: type-code u8 | size u16 | name-len u8 | name bytes

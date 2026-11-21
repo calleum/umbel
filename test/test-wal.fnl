@@ -1,4 +1,4 @@
-;;; ARIES WAL and power-loss crash recovery tests — roadmap tasks 5.1 & 5.2.
+;;; ARIES WAL and power-loss crash recovery tests.
 
 (local t (require :harness))
 (local wal (require :umbel.wal))

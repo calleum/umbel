@@ -1,6 +1,6 @@
 ;;; umbel.table — table layer tying catalog, page dir, bufmgr, WAL, and 2PL.
 ;;
-;; File layout (roadmap task 4.3):
+;; File layout:
 ;;
 ;;   page 0  catalog        — persisted schema
 ;;   page 1  page directory — free space per data page (rebuilt on recovery)
